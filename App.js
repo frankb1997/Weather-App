@@ -1,212 +1,279 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
+  StatusBar,
+} from 'react-native';
 import * as Location from 'expo-location';
 
-const API_KEY = process.env.8d69f73004385540a661a6ee9911d84a';
+const API_KEY = process.env.EXPO_PUBLIC_WEATHER_API_KEY;
+
+const getWeatherTheme = (condition) => {
+  const c = condition?.toLowerCase() || '';
+  if (c.includes('clear')) return { bg: '#FF8C42', accent: '#FFD166', emoji: '☀️' };
+  if (c.includes('cloud')) return { bg: '#6B7FA3', accent: '#A8BCDC', emoji: '☁️' };
+  if (c.includes('rain') || c.includes('drizzle')) return { bg: '#3A6B8A', accent: '#74B3D4', emoji: '🌧️' };
+  if (c.includes('snow')) return { bg: '#8FB4CC', accent: '#D6EAF8', emoji: '❄️' };
+  if (c.includes('thunder') || c.includes('storm')) return { bg: '#2C3E50', accent: '#8E44AD', emoji: '⛈️' };
+  if (c.includes('mist') || c.includes('fog') || c.includes('haze')) return { bg: '#7F8C8D', accent: '#BDC3C7', emoji: '🌫️' };
+  return { bg: '#3B7DD8', accent: '#74B3D4', emoji: '🌤️' };
+};
 
 export default function App() {
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  useEffect(() => {
-    getWeatherData();
-  }, []);
-
-  const getWeatherData = async () => {
+  const getWeatherData = useCallback(async () => {
     try {
-      setLoading(true);
-      
-      // Get user's location
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setError('Permission to access location was denied');
-        setLoading(false);
+        setError('Location permission denied. Please enable it in your device settings.');
         return;
       }
 
-      let location = await Location.getCurrentPositionAsync({});
+      let location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
       const { latitude, longitude } = location.coords;
 
-      // Fetch weather data from OpenWeatherMap API
       const response = await fetch(
         `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch weather data');
+        const errData = await response.json();
+        throw new Error(errData.message || 'Failed to fetch weather data');
       }
 
       const data = await response.json();
       setWeather(data);
+      setLastUpdated(new Date());
       setError(null);
     } catch (err) {
       setError(err.message);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
 
-  // Get weather emoji based on condition
-  const getWeatherEmoji = (description) => {
-    const desc = description.toLowerCase();
-    if (desc.includes('clear') || desc.includes('sunny')) return '☀️';
-    if (desc.includes('cloud')) return '☁️';
-    if (desc.includes('rain')) return '🌧️';
-    if (desc.includes('snow')) return '❄️';
-    if (desc.includes('storm') || desc.includes('thunder')) return '⛈️';
-    if (desc.includes('mist') || desc.includes('fog')) return '🌫️';
-    return '🌤️';
+  const load = useCallback(async () => {
+    setLoading(true);
+    await getWeatherData();
+    setLoading(false);
+  }, [getWeatherData]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await getWeatherData();
+    setRefreshing(false);
+  }, [getWeatherData]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const formatTime = (date) => {
+    if (!date) return '';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#0000ff" />
-        <Text style={styles.loadingText}>Getting your weather...</Text>
+      <View style={styles.centered}>
+        <StatusBar barStyle="light-content" />
+        <ActivityIndicator size="large" color="#fff" />
+        <Text style={styles.loadingText}>Locating you...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>❌ Error</Text>
+      <View style={styles.centered}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.errorEmoji}>⚠️</Text>
+        <Text style={styles.errorTitle}>Something went wrong</Text>
         <Text style={styles.errorDetail}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={load}>
+          <Text style={styles.retryText}>Try Again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  if (!weather) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>No weather data</Text>
-      </View>
-    );
-  }
+  if (!weather) return null;
 
-  const temp = Math.round(weather.main.temp);
   const condition = weather.weather[0].main;
   const description = weather.weather[0].description;
+  const theme = getWeatherTheme(condition);
+
+  const temp = Math.round(weather.main.temp);
+  const feelsLike = Math.round(weather.main.feels_like);
   const humidity = weather.main.humidity;
-  const windSpeed = Math.round(weather.wind.speed);
+  const windSpeed = Math.round(weather.wind.speed * 3.6); // m/s → km/h
   const city = weather.name;
   const country = weather.sys.country;
-  const emoji = getWeatherEmoji(description);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.emoji}>{emoji}</Text>
-        
-        <Text style={styles.location}>
-          {city}, {country}
-        </Text>
+    <ScrollView
+      contentContainerStyle={[styles.container, { backgroundColor: theme.bg }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#fff"
+        />
+      }
+    >
+      <StatusBar barStyle="light-content" />
 
-        <Text style={styles.temperature}>{temp}°C</Text>
+      <Text style={styles.locationText}>📍 {city}, {country}</Text>
 
-        <Text style={styles.condition}>{condition}</Text>
-        <Text style={styles.description}>{description}</Text>
+      <Text style={styles.bigEmoji}>{theme.emoji}</Text>
 
-        <View style={styles.detailsContainer}>
-          <View style={styles.detail}>
-            <Text style={styles.detailLabel}>Humidity</Text>
-            <Text style={styles.detailValue}>{humidity}%</Text>
-          </View>
+      <Text style={styles.tempText}>{temp}°</Text>
+      <Text style={styles.conditionText}>{description}</Text>
+      <Text style={[styles.feelsLikeText, { color: theme.accent }]}>
+        Feels like {feelsLike}°
+      </Text>
 
-          <View style={styles.detail}>
-            <Text style={styles.detailLabel}>Wind Speed</Text>
-            <Text style={styles.detailValue}>{windSpeed} m/s</Text>
-          </View>
+      <View style={styles.divider} />
+
+      <View style={styles.detailsRow}>
+        <View style={styles.detailBox}>
+          <Text style={styles.detailEmoji}>💧</Text>
+          <Text style={styles.detailValue}>{humidity}%</Text>
+          <Text style={styles.detailLabel}>Humidity</Text>
+        </View>
+        <View style={styles.detailBox}>
+          <Text style={styles.detailEmoji}>💨</Text>
+          <Text style={styles.detailValue}>{windSpeed}</Text>
+          <Text style={styles.detailLabel}>km/h Wind</Text>
         </View>
       </View>
-    </View>
+
+      {lastUpdated && (
+        <Text style={styles.updatedText}>
+          Updated at {formatTime(lastUpdated)} · Pull to refresh
+        </Text>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centered: {
     flex: 1,
-    backgroundColor: '#87CEEB',
+    backgroundColor: '#3B7DD8',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-  },
-  card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 20,
     padding: 30,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  emoji: {
-    fontSize: 80,
-    marginBottom: 20,
-  },
-  location: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  temperature: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: '#FF6B6B',
-    marginBottom: 10,
-  },
-  condition: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#555',
-    marginBottom: 5,
-  },
-  description: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 20,
-    textTransform: 'capitalize',
-  },
-  detailsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
-  },
-  detail: {
-    alignItems: 'center',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 5,
-  },
-  detailValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
   },
   loadingText: {
+    color: '#fff',
     fontSize: 18,
-    color: '#333',
-    marginTop: 15,
+    marginTop: 16,
+    fontWeight: '500',
   },
-  errorText: {
-    fontSize: 28,
+  errorEmoji: {
+    fontSize: 60,
+    marginBottom: 16,
+  },
+  errorTitle: {
+    color: '#fff',
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#FF6B6B',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   errorDetail: {
-    fontSize: 16,
-    color: '#888',
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 15,
     textAlign: 'center',
+    marginBottom: 30,
+  },
+  retryButton: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  retryText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  container: {
+    flexGrow: 1,
+    alignItems: 'center',
+    paddingTop: 80,
+    paddingBottom: 50,
+    paddingHorizontal: 30,
+  },
+  locationText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 20,
+  },
+  bigEmoji: {
+    fontSize: 100,
+    marginBottom: 10,
+  },
+  tempText: {
+    color: '#fff',
+    fontSize: 96,
+    fontWeight: '200',
+    lineHeight: 100,
+  },
+  conditionText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 20,
+    textTransform: 'capitalize',
+    marginTop: 8,
+  },
+  feelsLikeText: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginTop: 6,
+  },
+  divider: {
+    width: '80%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginVertical: 30,
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    gap: 40,
+  },
+  detailBox: {
+    alignItems: 'center',
+  },
+  detailEmoji: {
+    fontSize: 28,
+    marginBottom: 4,
+  },
+  detailValue: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  detailLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  updatedText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    marginTop: 40,
   },
 });
