@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
 
-const API_KEY = 'YOUR_API_KEY_HERE';
+const API_KEY = process.env.8d69f73004385540a661a6ee9911d84a';
 
 export default function App() {
   const [weather, setWeather] = useState(null);
